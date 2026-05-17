@@ -1,5 +1,12 @@
 # Symmetric mTLS MCP Machine Kit
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-555555)
+![Security](https://img.shields.io/badge/Security-mTLS-blue)
+![Network](https://img.shields.io/badge/Reachability-Tailscale%20%7C%20Public%20%7C%20Tunnel-7B61FF)
+[![Docs: EN](https://img.shields.io/badge/Docs-English-blue)](./README.md)
+
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
 一个面向新手的工具包：用 **mTLS** 把**你自己的机器**连接起来，并把它们暴露给支持 MCP 的 agent；机器之间的可达性可以通过 **Tailscale、公网地址或反向隧道**来提供。

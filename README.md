@@ -1,5 +1,12 @@
 # Symmetric mTLS MCP Machine Kit
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](./LICENSE)
+![Node.js](https://img.shields.io/badge/Node.js-18%2B-339933?logo=node.js&logoColor=white)
+![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux-555555)
+![Security](https://img.shields.io/badge/Security-mTLS-blue)
+![Network](https://img.shields.io/badge/Reachability-Tailscale%20%7C%20Public%20%7C%20Tunnel-7B61FF)
+[![Docs: 中文](https://img.shields.io/badge/Docs-%E4%B8%AD%E6%96%87-red)](./README.zh-CN.md)
+
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
 A beginner-friendly toolkit for connecting **your own machines** and exposing them to MCP-capable agents over **mTLS**, with reachability provided by **Tailscale, public endpoints, or reverse tunnels**.
