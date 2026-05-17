@@ -1,0 +1,25 @@
+# Generic reverse SSH tunnel service for machines behind NAT.
+# Example: expose local 127.0.0.1:8443 on a public relay as 127.0.0.1:18443.
+# Render the remote machine endpoint URL to https://{{REMOTE_ENDPOINT_HOST}}:{{REMOTE_BIND_PORT}}
+# when endpoint.strategy is reverse_tunnel.
+[Unit]
+Description=Peer Ops reverse SSH tunnel (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{USER}}
+Environment=HOME={{HOME_DIR}}
+ExecStart=/usr/bin/ssh -N \
+  -o ExitOnForwardFailure=yes \
+  -o ServerAliveInterval=30 \
+  -o ServerAliveCountMax=3 \
+  -o StrictHostKeyChecking=yes \
+  -R {{REMOTE_BIND_HOST}}:{{REMOTE_BIND_PORT}}:{{LOCAL_HOST}}:{{LOCAL_PORT}} \
+  {{SSH_TARGET}}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

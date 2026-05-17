@@ -1,0 +1,66 @@
+{
+  "runtime_defaults": {
+    "workspace_dir": "/absolute/path/to/workspace",
+    "state_dir": "./log/state",
+    "job_dir": "./log/jobs",
+    "max_archive_bytes": 52428800
+  },
+  "tls_defaults": {
+    "ca_cert": "./certs/ca/ca.crt"
+  },
+  "machines": {
+    "rice": {
+      "listen": { "host": "127.0.0.1", "port": 8443 },
+      "tls": {
+        "cert": "./certs/rice/peer.crt",
+        "key": "./certs/rice/peer.key"
+      },
+      "endpoint": {
+        "strategy": "reverse_tunnel",
+        "url": "https://rice-tunnel.example.com:18443",
+        "server_name": "rice",
+        "metadata": {
+          "remote_bind_host": "127.0.0.1",
+          "remote_bind_port": 18443
+        }
+      },
+      "agents": {
+        "rice": {
+          "hermes_home": "/absolute/path/to/hermes-home",
+          "telegram": {
+            "bot_token_env": "RICE_TG_BOT_TOKEN",
+            "chat_id_env": "RICE_TG_CHAT_ID"
+          }
+        }
+      }
+    },
+    "kobune": {
+      "listen": { "host": "0.0.0.0", "port": 8443 },
+      "tls": {
+        "cert": "./certs/kobune/peer.crt",
+        "key": "./certs/kobune/peer.key"
+      },
+      "endpoint": {
+        "strategy": "public",
+        "url": "https://machine-b.example.com:8443",
+        "server_name": "kobune"
+      },
+      "agents": {
+        "kobune": {
+          "hermes_home": "/absolute/path/to/hermes-home",
+          "telegram": {
+            "bot_token_env": "KOBUNE_TG_BOT_TOKEN",
+            "chat_id_env": "KOBUNE_TG_CHAT_ID"
+          }
+        },
+        "reze": {
+          "hermes_home": "/absolute/path/to/hermes-profiles/reze",
+          "telegram": {
+            "bot_token_env": "REZE_TG_BOT_TOKEN",
+            "chat_id_env": "REZE_TG_CHAT_ID"
+          }
+        }
+      }
+    }
+  }
+}

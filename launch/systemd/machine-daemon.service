@@ -1,0 +1,30 @@
+# Generic systemd unit for the machine daemon.
+# Replace placeholders before installing.
+[Unit]
+Description=Peer Ops MCP mTLS daemon (%i)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User={{USER}}
+WorkingDirectory={{PROJECT_DIR}}
+Environment=NODE_ENV=production
+Environment=MACHINE_CONFIG={{CONFIG_PATH}}
+Environment=HOME={{HOME_DIR}}
+# Optional push hook for agent notifications:
+# Environment=PEER_AGENT_CHAT_HOOK={{PROJECT_DIR}}/scripts/agent-dispatch-hook.py
+# Environment=PEER_AGENT_EXEC_MODE=notify
+# Environment=PEER_AGENT_EXEC_TIMEOUT_SEC=1800
+# Environment=PEER_AGENT_HOME={{HOME_DIR}}
+# Environment=PEER_AGENT_HERMES_HOME={{HERMES_HOME}}
+# Environment=PEER_AGENT_HERMES_BIN={{HERMES_BIN}}
+# Environment=PEER_AGENT_HERMES_ARGS=--quiet
+ExecStart=/usr/bin/env node {{PROJECT_DIR}}/core/peer-daemon.js {{CONFIG_PATH}}
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

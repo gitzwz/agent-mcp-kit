@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+certs/*
+!certs/.gitkeep
+!certs/ca/
+certs/ca/*
+!certs/ca/.gitkeep
+log/
+state/
+config/machine.*.json
+!config/machine.example.json
+*.local.json
+*.tar.gz
+scripts/__pycache__/

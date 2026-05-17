@@ -1,0 +1,22 @@
+{
+  "name": "bash-task-kit-mcp-peer",
+  "version": "0.1.0",
+  "private": false,
+  "type": "module",
+  "description": "Symmetric peer MCP + mTLS workspace executor",
+  "license": "MIT",
+  "bin": {
+    "bash-task-peer-mcp": "./core/mcp-server.js",
+    "bash-task-peer-daemon": "./core/peer-daemon.js",
+    "render-peer-config": "./core/render-machine-config.js"
+  },
+  "scripts": {
+    "lint": "node --check core/mcp-server.js && node --check core/peer-daemon.js && node --check core/peer-lib.js && node --check core/render-machine-config.js",
+    "test": "npm run lint && node scripts/smoke-config-hot-reload.mjs && node scripts/smoke-render-machine-config.mjs",
+    "start:daemon": "node core/peer-daemon.js ${MACHINE_CONFIG:?set MACHINE_CONFIG=/path/to/machine-config.json}",
+    "start:mcp": "node core/mcp-server.js ${MACHINE_CONFIG:?set MACHINE_CONFIG=/path/to/machine-config.json}"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}

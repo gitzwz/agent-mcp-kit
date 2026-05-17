@@ -1,0 +1,44 @@
+{
+  "machine_name": "your-machine",
+  "listen_host": "0.0.0.0",
+  "listen_port": 8443,
+  "workspace_dir": "/absolute/path/to/workspace",
+  "state_dir": "../log/state",
+  "job_dir": "../log/jobs",
+  "max_archive_bytes": 52428800,
+  "tls": {
+    "ca_cert": "../certs/ca/ca.crt",
+    "cert": "../certs/your-machine/peer.crt",
+    "key": "../certs/your-machine/peer.key"
+  },
+  "allowed_machine_names": [
+    "your-machine",
+    "peer-machine"
+  ],
+  "machines": {
+    "your-machine": {
+      "url": "https://your-machine.example.com:8443",
+      "server_name": "your-machine",
+      "endpoint_strategy": "manual",
+      "endpoint_metadata": {}
+    },
+    "peer-machine": {
+      "url": "https://peer-machine.example.com:8443",
+      "server_name": "peer-machine",
+      "endpoint_strategy": "manual",
+      "endpoint_metadata": {}
+    }
+  },
+  "agent_profile_map": {
+    "worker": "/path/to/hermes/profile"
+  },
+  "agent_telegram_map": {
+    "worker": {
+      "bot_token_env": "WORKER_TG_BOT_TOKEN",
+      "chat_id_env": "WORKER_TG_CHAT_ID"
+    }
+  },
+  "mcp": {
+    "show_mailbox_tools": false
+  }
+}
