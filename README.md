@@ -1,6 +1,6 @@
 # Symmetric mTLS MCP Machine Kit
 
-A beginner-friendly toolkit for connecting **your own machines** and exposing them to MCP-capable agents.
+A beginner-friendly toolkit for connecting **your own machines** and exposing them to MCP-capable agents over **mTLS**, with reachability provided by **Tailscale, public endpoints, or reverse tunnels**.
 
 With this project, an agent can:
 - send a notification to an agent on another machine
