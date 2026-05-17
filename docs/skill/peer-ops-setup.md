@@ -369,6 +369,58 @@ Recommended secret file:
 ~/.config/bash-task-kit/<machine-name>/telegram.env
 ```
 
+### Important: config alone is not enough
+For the agent hook path, it is **not enough** to put Telegram routing only inside machine config.
+
+If you use per-agent Telegram routing, all three layers must agree:
+1. `agent_telegram_map` exists in `config/machine.<name>.json`
+2. the referenced env vars actually exist in the live service manager environment
+   - e.g. `RICE_TG_BOT_TOKEN`, `RICE_TG_CHAT_ID`
+   - e.g. `REZE_TG_BOT_TOKEN`, `REZE_TG_CHAT_ID`
+3. the live daemon environment also exports:
+   - `PEER_AGENT_TELEGRAM_MAP`
+
+If layer 3 is missing, the hook can fail even though machine config looks correct.
+Typical error:
+
+```text
+Telegram route for agent <name> is missing in PEER_AGENT_TELEGRAM_MAP; fallback TG_BOT_TOKEN/TG_CHAT_ID is disabled to prevent cross-agent misrouting
+```
+
+### Verify the live runtime, not just files
+On macOS:
+
+```bash
+launchctl print gui/$(id -u)/com.yuuki.bash-task-peer | sed -n '/PEER_AGENT_TELEGRAM_MAP/,/XPC_SERVICE_NAME/p'
+```
+
+On Linux/systemd:
+
+```bash
+systemctl show bash-task-peer.service -p Environment --value | tr ' ' '\n' | grep PEER_AGENT_TELEGRAM_MAP
+```
+
+If you edit a plist or systemd drop-in, always restart/reload the real service and verify the **live environment** afterward.
+
+---
+
+## 11.5 Multi-agent ring preflight
+
+If one machine hosts more than one agent/profile, do this before ring tests:
+
+1. verify the default profile has MCP registered
+2. verify every extra profile also has MCP registered
+3. only then test `machine-A -> machine-B-default-agent -> machine-B-other-agent -> machine-A`
+
+Example check on Linux:
+
+```bash
+HERMES_HOME=/root/.hermes hermes mcp ls
+HERMES_HOME=/root/.hermes/profiles/reze hermes mcp ls
+```
+
+If the named profile has MCP but the default profile does not, the middle hop may receive tasks but fail to relay the nested notify.
+
 ---
 
 ## 12. First validation target
