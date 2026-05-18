@@ -214,6 +214,7 @@ function renderMachineConfig(topology, selfMachineName, outputPath) {
     workspace_dir: resolveAbsoluteFromOutput(outputPath, selfWorkspace, 'workspace_dir'),
     state_dir: resolveAbsoluteFromOutput(outputPath, selfState, 'state_dir'),
     job_dir: resolveAbsoluteFromOutput(outputPath, selfJobDir, 'job_dir'),
+    job_partition_by_date: true,
     max_archive_bytes: maxArchiveBytes,
     tls: {
       ca_cert: resolveAbsoluteFromOutput(outputPath, selfTls.ca_cert || tlsDefaults.ca_cert, 'tls.ca_cert'),

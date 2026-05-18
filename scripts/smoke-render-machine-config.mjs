@@ -26,6 +26,8 @@ try {
   assert.equal(rendered.workspace_dir, path.join(tmp, 'workspace'));
   assert.equal(rendered.state_dir, path.join(tmp, 'state'));
   assert.equal(rendered.job_dir, path.join(tmp, 'jobs'));
+  assert.equal(rendered.job_partition_by_date, true);
+  assert.ok(!Object.hasOwn(rendered, 'job_output_max_bytes'));
   assert.equal(rendered.tls.ca_cert, path.join(tmp, 'certs', 'ca', 'ca.crt'));
   assert.equal(rendered.tls.cert, path.join(tmp, 'certs', 'rice', 'peer.crt'));
   assert.equal(rendered.tls.key, path.join(tmp, 'certs', 'rice', 'peer.key'));
@@ -53,6 +55,8 @@ try {
   assert.equal(renderedKobune.workspace_dir, path.join(tmp, 'workspace'));
   assert.equal(renderedKobune.state_dir, path.join(tmp, 'state'));
   assert.equal(renderedKobune.job_dir, path.join(tmp, 'jobs'));
+  assert.equal(renderedKobune.job_partition_by_date, true);
+  assert.ok(!Object.hasOwn(renderedKobune, 'job_output_max_bytes'));
   assert.deepEqual(renderedKobune.allowed_machine_names, ['kobune', 'rice']);
   assert.equal(renderedKobune.agent_profile_map.kobune, '/absolute/path/to/hermes-home');
   assert.equal(renderedKobune.agent_profile_map['kobune.kobune'], '/absolute/path/to/hermes-home');

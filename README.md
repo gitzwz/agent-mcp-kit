@@ -33,6 +33,10 @@ This repo provides that missing layer.
 
 For installation, treat this README as the concept page, and treat `docs/skill/peer-ops-setup.md` as the real setup guide.
 
+Operational default worth knowing:
+- rendered configs opt into `job_partition_by_date: true`
+- `job_output_max_bytes` is optional in config; if omitted, runtime falls back to **10 MiB (10485760 bytes)**
+
 ---
 
 ## Read this first: 4 ideas you need

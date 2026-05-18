@@ -14,6 +14,7 @@ function cfgText(dir, overrides = {}) {
     workspace_dir: './workspace',
     state_dir: './state',
     job_dir: './jobs',
+    job_partition_by_date: true,
     max_archive_bytes: 1024,
     tls: {
       ca_cert: './certs/ca.crt',
@@ -55,6 +56,8 @@ try {
   assert.equal(store.snapshot().machines['peer-a'].server_name, 'peer-a');
   assert.equal(store.snapshot().agent_telegram_map['agent-a'].bot_token_env, 'AGENT_A_TG_BOT_TOKEN');
   assert.equal(store.snapshot().agent_profile_map['agent-a'], '/tmp/hermes-agent-a');
+  assert.equal(store.snapshot().job_partition_by_date, true);
+  assert.equal(store.snapshot().job_output_max_bytes, 10 * 1024 * 1024);
 
   await fsp.writeFile(configPath, cfgText(tmp, {
     machine_name: 'Peer-B',

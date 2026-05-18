@@ -114,6 +114,12 @@ export function loadConfig(configPathArg) {
   cfg.workspace_dir = path.resolve(path.dirname(configPath), cfg.workspace_dir);
   cfg.state_dir = path.resolve(path.dirname(configPath), cfg.state_dir);
   cfg.job_dir = path.resolve(path.dirname(configPath), cfg.job_dir || './log/jobs');
+  cfg.job_partition_by_date = cfg.job_partition_by_date !== false;
+  const defaultJobOutputMaxBytes = 10 * 1024 * 1024;
+  const parsedJobOutputMaxBytes = Number(cfg.job_output_max_bytes ?? defaultJobOutputMaxBytes);
+  cfg.job_output_max_bytes = Number.isFinite(parsedJobOutputMaxBytes) && parsedJobOutputMaxBytes > 0
+    ? Math.min(Math.trunc(parsedJobOutputMaxBytes), 1024 * 1024 * 1024)
+    : defaultJobOutputMaxBytes;
   cfg.tls.ca_cert = path.resolve(path.dirname(configPath), cfg.tls.ca_cert);
   cfg.tls.cert = path.resolve(path.dirname(configPath), cfg.tls.cert);
   cfg.tls.key = path.resolve(path.dirname(configPath), cfg.tls.key);

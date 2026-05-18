@@ -172,6 +172,12 @@ Key rule:
 All runtime directory paths (`workspace_dir`, `state_dir`, `job_dir`) and TLS paths in the rendered config are **absolute**.
 The topology file uses paths relative to `config/` (e.g. `../workspace`, `../certs/ca/ca.crt`); the renderer resolves them to absolute paths at render time.
 
+By default, rendered configs include:
+- `job_partition_by_date: true`
+- no explicit `job_output_max_bytes` key unless you choose to add one manually
+
+At runtime, omitting `job_output_max_bytes` is safe: the daemon defaults it to **10 MiB (10485760 bytes)** in code.
+
 ### Sibling directory layout
 
 Runtime directories should be **siblings** of the project root, not nested inside it:
