@@ -276,11 +276,23 @@ Example idea:
 - machine `vps` has endpoint `https://100.64.0.20:8443`
 - machine `vps` also hosts agent `worker`
 
+**Important path rule:** relative paths in the topology are written as if the rendered file will live under `config/`.
+So use:
+- `../certs/...`
+- `../workspace`
+- `../state`
+- `../jobs`
+
+Do **not** use `./certs/...` unless you really mean `config/certs/...`.
+
+The renderer resolves these to **absolute paths** in `config/machine.<name>.json`, so each machine should render its own file locally.
+
 ---
 
 ### Step 5: render per-machine config
 
 On each machine, render its own runtime config.
+The rendered file contains **absolute paths**, so do not render once and scp that same file to a machine with a different filesystem layout.
 
 On the laptop:
 

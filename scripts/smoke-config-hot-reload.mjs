@@ -8,7 +8,7 @@ import { createConfigStore } from '../core/peer-lib.js';
 
 function cfgText(dir, overrides = {}) {
   const cfg = {
-    machine_name: 'peer-a',
+    machine_name: 'Peer-A',
     listen_host: '127.0.0.1',
     listen_port: 18443,
     workspace_dir: './workspace',
@@ -20,19 +20,19 @@ function cfgText(dir, overrides = {}) {
       cert: './certs/peer.crt',
       key: './certs/peer.key',
     },
-    allowed_server_names: ['peer-a'],
+    allowed_server_names: ['Peer-A'],
     peers: {
-      'peer-a': {
+      'Peer-A': {
         url: 'https://127.0.0.1:18443',
-        server_name: 'peer-a',
+        server_name: 'Peer-A',
       },
     },
     mcp: { show_mailbox_tools: false },
     agent_profile_map: {
-      'agent-a': '/tmp/hermes-agent-a',
+      'Agent-A': '/tmp/hermes-agent-a',
     },
     agent_telegram_map: {
-      'agent-a': {
+      'Agent-A': {
         bot_token_env: 'AGENT_A_TG_BOT_TOKEN',
         chat_id_env: 'AGENT_A_TG_CHAT_ID',
       },
@@ -51,12 +51,25 @@ await fsp.writeFile(configPath, cfgText(tmp));
 const store = createConfigStore(configPath, { watch: true, debounceMs: 50, component: 'smoke-config-hot-reload' });
 try {
   assert.equal(store.snapshot().machine_name, 'peer-a');
+  assert.deepEqual(store.snapshot().allowed_machine_names, ['peer-a']);
+  assert.equal(store.snapshot().machines['peer-a'].server_name, 'peer-a');
   assert.equal(store.snapshot().agent_telegram_map['agent-a'].bot_token_env, 'AGENT_A_TG_BOT_TOKEN');
+  assert.equal(store.snapshot().agent_profile_map['agent-a'], '/tmp/hermes-agent-a');
 
-  await fsp.writeFile(configPath, cfgText(tmp, { machine_name: 'peer-b', allowed_server_names: ['peer-b'] }));
+  await fsp.writeFile(configPath, cfgText(tmp, {
+    machine_name: 'Peer-B',
+    allowed_server_names: ['Peer-B'],
+    peers: {
+      'Peer-B': {
+        url: 'https://127.0.0.1:18443',
+        server_name: 'Peer-B',
+      },
+    },
+  }));
   await wait(150);
   assert.equal(store.snapshot().machine_name, 'peer-b');
-  assert.deepEqual(store.snapshot().allowed_server_names, ['peer-b']);
+  assert.deepEqual(store.snapshot().allowed_machine_names, ['peer-b']);
+  assert.equal(store.snapshot().machines['peer-b'].server_name, 'peer-b');
 
   await fsp.writeFile(configPath, '{ invalid json');
   await wait(150);

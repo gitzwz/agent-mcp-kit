@@ -1,19 +1,19 @@
 {
   "runtime_defaults": {
-    "workspace_dir": "/absolute/path/to/workspace",
-    "state_dir": "./log/state",
-    "job_dir": "./log/jobs",
+    "workspace_dir": "../workspace",
+    "state_dir": "../state",
+    "job_dir": "../jobs",
     "max_archive_bytes": 52428800
   },
   "tls_defaults": {
-    "ca_cert": "./certs/ca/ca.crt"
+    "ca_cert": "../certs/ca/ca.crt"
   },
   "machines": {
     "rice": {
       "listen": { "host": "127.0.0.1", "port": 8443 },
       "tls": {
-        "cert": "./certs/rice/peer.crt",
-        "key": "./certs/rice/peer.key"
+        "cert": "../certs/rice/peer.crt",
+        "key": "../certs/rice/peer.key"
       },
       "endpoint": {
         "strategy": "reverse_tunnel",
@@ -37,8 +37,8 @@
     "kobune": {
       "listen": { "host": "0.0.0.0", "port": 8443 },
       "tls": {
-        "cert": "./certs/kobune/peer.crt",
-        "key": "./certs/kobune/peer.key"
+        "cert": "../certs/kobune/peer.crt",
+        "key": "../certs/kobune/peer.key"
       },
       "endpoint": {
         "strategy": "public",

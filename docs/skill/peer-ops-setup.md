@@ -153,11 +153,12 @@ bash-task-kit/
 │   ├── topology.yaml           # user-created live topology
 │   ├── machine.laptop.json     # rendered; do not commit
 │   └── machine.vps.json        # rendered; do not commit
+├── workspace/                  # runtime workspace; do not commit
+├── state/                      # runtime state; do not commit
+├── jobs/                       # runtime job outputs; do not commit
 ├── core/
 ├── scripts/
-├── launch/
-├── log/                        # runtime output; do not commit
-└── state/                      # runtime state; do not commit
+└── launch/
 ```
 
 Key rule:
@@ -165,9 +166,67 @@ Key rule:
 - **the CA lives under `certs/ca/`**
 - **each machine gets its own subdirectory under `certs/<machine-name>/`**
 
+### Rendered machine configs
+
+`render-machine-config` writes its output under `config/` (e.g. `config/machine.laptop.json`).
+All runtime directory paths (`workspace_dir`, `state_dir`, `job_dir`) and TLS paths in the rendered config are **absolute**.
+The topology file uses paths relative to `config/` (e.g. `../workspace`, `../certs/ca/ca.crt`); the renderer resolves them to absolute paths at render time.
+
+### Sibling directory layout
+
+Runtime directories should be **siblings** of the project root, not nested inside it:
+
+```text
+parent/
+├── bash-task-kit/        # project root (contains config/, core/, scripts/)
+├── workspace/            # workspace_dir — ../workspace from config/
+├── state/                # state_dir — ../state from config/
+├── jobs/                 # job_dir — ../jobs from config/
+└── certs/                # TLS material — ../certs from config/
+```
+
+Alternatively, keep them as siblings inside the project root:
+
+```text
+bash-task-kit/
+├── config/               # rendered configs live here
+├── workspace/
+├── state/
+├── jobs/
+├── certs/
+└── core/
+```
+
+### Non-overlap constraints
+
+The daemon enforces these at load time:
+- `workspace_dir` must not live under `log/` in the repo
+- `workspace_dir` must not overlap `state_dir` (neither can be a prefix of the other)
+- `job_dir` must not overlap `state_dir` (neither can be a prefix of the other)
+
+If any constraint is violated, the daemon refuses to start with a clear error message.
+
+### Cross-machine absolute-path guidance
+
+On each machine, the rendered config contains absolute paths specific to that machine's filesystem.
+When deploying to multiple machines:
+- Render the config **on each target machine** (or with `--out` pointing to the correct output location)
+- Do not copy a rendered config from one machine to another — the absolute paths will be wrong
+- The topology file is portable; the rendered config is not
+
 ---
 
 ## 5. Reachability decision tree
+
+### Runtime path constraints
+
+Before choosing networking, keep these directory constraints in mind:
+- `state_dir` and `job_dir` must not overlap or contain each other
+- `workspace_dir` must not live under the repo's `log/` tree
+- `workspace_dir` must not overlap `state_dir`
+- the simplest safe layout is to keep `workspace/`, `state/`, and `jobs/` as three sibling directories
+
+These are validated by the daemon, and `render-machine-config` now preflights the rendered config before writing it.
 
 Use this exact decision tree.
 
@@ -231,10 +290,22 @@ npm ci
 If they do not already exist:
 
 ```bash
-mkdir -p certs/ca certs/laptop certs/vps config log state
+mkdir -p certs/ca certs/laptop certs/vps config workspace state jobs
 ```
 
 Replace `laptop` / `vps` with the real machine names if different.
+
+**Directory rule:** all runtime directories should be siblings of `config/`, not nested inside each other.
+Recommended shape:
+
+```text
+<repo>/
+  ├─ config/        # machine.<name>.json lives here
+  ├─ certs/         # use ../certs/...
+  ├─ workspace/     # use ../workspace
+  ├─ state/         # use ../state
+  └─ jobs/          # use ../jobs (do not nest under state/)
+```
 
 ### 7.3 Generate CA and certs
 Run on one trusted machine:
@@ -268,6 +339,18 @@ Change:
 - local Hermes paths
 - optional agent names
 - optional Telegram env-var names
+
+#### Path resolution rule
+All relative paths in the topology (`workspace_dir`, `state_dir`, `job_dir`, `tls_defaults.ca_cert`, `machines.<name>.tls.cert`, `machines.<name>.tls.key`) are interpreted **relative to the rendered config location**, which is usually `config/machine.<name>.json`.
+
+That means:
+- `../certs/...` resolves to the repo-level `certs/`
+- `../workspace`, `../state`, `../jobs` resolve to sibling directories next to `config/`
+- `./certs/...` would incorrectly resolve to `config/certs/...`
+
+The renderer now expands these to **absolute paths** before writing the machine config, but the topology file should still use the correct `../...` form so the intent is obvious.
+
+If two machines use different filesystem layouts, do **not** copy one rendered config to the other machine. Keep the shared topology portable, then render separately on each machine using absolute machine-local paths where needed.
 
 ### 7.6 Render config
 On each machine:

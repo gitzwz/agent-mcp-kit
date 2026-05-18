@@ -3,7 +3,7 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import https from 'node:https';
 import { spawn } from 'node:child_process';
-import { createConfigStore, ensureDirs, genJobId, safeRelativePath, resolveInside, rejectSymlinks, writeJson, readJson, canonicalMachineNameForIdentity } from './peer-lib.js';
+import { createConfigStore, ensureDirs, genJobId, safeRelativePath, resolveInside, rejectSymlinks, writeJson, readJson, canonicalMachineNameForIdentity, normalizePrincipalName } from './peer-lib.js';
 
 const cfgStore = createConfigStore(process.argv[2], { watch: true, component: 'peer-daemon' });
 await ensureDirs(cfgStore.snapshot());
@@ -305,10 +305,7 @@ async function handleMessage(cfg, machineName, payload) {
 }
 
 function safeMailboxField(name, value, maxLen = 200) {
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`${name} is required`);
-  }
-  const trimmed = value.trim();
+  const trimmed = normalizePrincipalName(value, name);
   if (trimmed.length > maxLen) {
     throw new Error(`${name} too long`);
   }

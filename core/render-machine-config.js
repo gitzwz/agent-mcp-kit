@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
+import { loadConfig, normalizePrincipalName } from './peer-lib.js';
 
 const DEFAULT_TOPOLOGY_PATH = path.resolve('config/topology.example.yaml');
 const DEFAULT_OUTPUT_PATH = path.resolve('config/machine-config.rendered.json');
@@ -14,9 +15,11 @@ const VALID_STRATEGIES = new Set([
 ]);
 
 function assertNoLegacyMachineName(machineName, contextLabel = 'machine_name') {
-  if (FORBIDDEN_LEGACY_PEER_IDS.has(machineName)) {
+  const normalized = normalizePrincipalName(machineName, contextLabel);
+  if (FORBIDDEN_LEGACY_PEER_IDS.has(normalized)) {
     throw new Error(`${contextLabel} uses forbidden legacy id: ${machineName}`);
   }
+  return normalized;
 }
 
 function printHelp() {
@@ -85,8 +88,16 @@ function normalizeStrategy(strategy) {
   return strategy;
 }
 
+function resolveAbsoluteFromOutput(outputPath, candidate, label) {
+  if (typeof candidate !== 'string' || !candidate.trim()) {
+    throw new Error(`${label} is required`);
+  }
+  const outputDir = path.dirname(path.resolve(outputPath));
+  return path.resolve(outputDir, candidate);
+}
+
 function resolveMachineEndpoint(machineName, machineRecord) {
-  assertNoLegacyMachineName(machineName, `machines.${machineName}`);
+  const normalizedMachineName = assertNoLegacyMachineName(machineName, `machines.${machineName}`);
   const endpoint = requireObject(`machines.${machineName}.endpoint`, machineRecord.endpoint);
   if (endpoint.aliases != null) {
     throw new Error(`machines.${machineName}.endpoint.aliases is forbidden`);
@@ -99,8 +110,10 @@ function resolveMachineEndpoint(machineName, machineRecord) {
   if (!url) {
     throw new Error(`machines.${machineName}.endpoint.url is required`);
   }
-  const serverName = typeof endpoint.server_name === 'string' && endpoint.server_name ? endpoint.server_name : machineName;
-  if (serverName !== machineName) {
+  const serverName = typeof endpoint.server_name === 'string' && endpoint.server_name
+    ? normalizePrincipalName(endpoint.server_name, `machines.${machineName}.endpoint.server_name`)
+    : normalizedMachineName;
+  if (serverName !== normalizedMachineName) {
     throw new Error(`machines.${machineName}.endpoint.server_name must equal machine id (${machineName})`);
   }
   return {
@@ -113,10 +126,13 @@ function resolveMachineEndpoint(machineName, machineRecord) {
   };
 }
 
-function renderMachineConfig(topology, selfMachineName) {
-  assertNoLegacyMachineName(selfMachineName, '--self');
+function renderMachineConfig(topology, selfMachineName, outputPath) {
+  const normalizedSelfMachineName = assertNoLegacyMachineName(selfMachineName, '--self');
   const machines = requireObject('machines', topology.machines);
-  const self = requireObject(`machines.${selfMachineName}`, machines[selfMachineName]);
+  const normalizedMachines = Object.fromEntries(
+    Object.entries(machines).map(([machineName, record]) => [normalizePrincipalName(machineName, `machines.${machineName}`), record]),
+  );
+  const self = requireObject(`machines.${selfMachineName}`, normalizedMachines[normalizedSelfMachineName]);
   const runtimeDefaults = requireObject('runtime_defaults', topology.runtime_defaults || {});
   const tlsDefaults = requireObject('tls_defaults', topology.tls_defaults || {});
 
@@ -124,7 +140,7 @@ function renderMachineConfig(topology, selfMachineName) {
   const selfTls = requireObject(`machines.${selfMachineName}.tls`, self.tls || {});
   const selfWorkspace = typeof self.workspace_dir === 'string' ? self.workspace_dir : runtimeDefaults.workspace_dir;
   const selfState = typeof self.state_dir === 'string' ? self.state_dir : runtimeDefaults.state_dir;
-  const selfJobDir = typeof self.job_dir === 'string' ? self.job_dir : (runtimeDefaults.job_dir || './log/jobs');
+  const selfJobDir = typeof self.job_dir === 'string' ? self.job_dir : (runtimeDefaults.job_dir || '../jobs');
   const maxArchiveBytes = Number(self.max_archive_bytes ?? runtimeDefaults.max_archive_bytes);
 
   if (!selfWorkspace || !selfState || !selfJobDir || !Number.isFinite(maxArchiveBytes)) {
@@ -134,15 +150,15 @@ function renderMachineConfig(topology, selfMachineName) {
   const renderedMachines = {};
   const allowedMachineNames = [];
 
-  for (const [machineName, machineRecord] of Object.entries(machines)) {
-    assertNoLegacyMachineName(machineName, `machines.${machineName}`);
+  for (const [rawMachineName, machineRecord] of Object.entries(machines)) {
+    const machineName = assertNoLegacyMachineName(rawMachineName, `machines.${rawMachineName}`);
     if (machineRecord?.aliases != null) {
-      throw new Error(`machines.${machineName}.aliases is forbidden`);
+      throw new Error(`machines.${rawMachineName}.aliases is forbidden`);
     }
     if (machineRecord?.certificate_common_name != null) {
-      throw new Error(`machines.${machineName}.certificate_common_name is forbidden`);
+      throw new Error(`machines.${rawMachineName}.certificate_common_name is forbidden`);
     }
-    const resolved = resolveMachineEndpoint(machineName, machineRecord);
+    const resolved = resolveMachineEndpoint(rawMachineName, machineRecord);
     renderedMachines[machineName] = {
       url: resolved.url,
       server_name: resolved.server_name,
@@ -162,8 +178,9 @@ function renderMachineConfig(topology, selfMachineName) {
     : {};
 
   const bindAgentRoute = (agentId, routeBuilder) => {
-    const scopedAgentId = `${selfMachineName}.${agentId}`;
-    for (const key of [agentId, scopedAgentId]) {
+    const normalizedAgentId = normalizePrincipalName(agentId, 'agent_id');
+    const scopedAgentId = `${normalizedSelfMachineName}.${normalizedAgentId}`;
+    for (const key of [normalizedAgentId, scopedAgentId]) {
       routeBuilder(key);
     }
   };
@@ -191,17 +208,17 @@ function renderMachineConfig(topology, selfMachineName) {
   }
 
   return {
-    machine_name: selfMachineName,
+    machine_name: normalizedSelfMachineName,
     listen_host: selfListen.host,
     listen_port: selfListen.port,
-    workspace_dir: selfWorkspace,
-    state_dir: selfState,
-    job_dir: selfJobDir,
+    workspace_dir: resolveAbsoluteFromOutput(outputPath, selfWorkspace, 'workspace_dir'),
+    state_dir: resolveAbsoluteFromOutput(outputPath, selfState, 'state_dir'),
+    job_dir: resolveAbsoluteFromOutput(outputPath, selfJobDir, 'job_dir'),
     max_archive_bytes: maxArchiveBytes,
     tls: {
-      ca_cert: selfTls.ca_cert || tlsDefaults.ca_cert,
-      cert: selfTls.cert,
-      key: selfTls.key,
+      ca_cert: resolveAbsoluteFromOutput(outputPath, selfTls.ca_cert || tlsDefaults.ca_cert, 'tls.ca_cert'),
+      cert: resolveAbsoluteFromOutput(outputPath, selfTls.cert, 'tls.cert'),
+      key: resolveAbsoluteFromOutput(outputPath, selfTls.key, 'tls.key'),
     },
     allowed_machine_names: uniqueAllowedMachineNames,
     machines: renderedMachines,
@@ -211,13 +228,14 @@ function renderMachineConfig(topology, selfMachineName) {
 }
 
 function validateRenderedConfig(config, selfMachineName) {
+  const normalizedSelfMachineName = normalizePrincipalName(selfMachineName, '--self');
   if (!config.listen_host || !config.listen_port) {
     throw new Error(`machine ${selfMachineName} is missing listen settings`);
   }
   if (!config.tls?.ca_cert || !config.tls?.cert || !config.tls?.key) {
     throw new Error(`machine ${selfMachineName} is missing tls paths`);
   }
-  if (!config.machines?.[selfMachineName]) {
+  if (!config.machines?.[normalizedSelfMachineName]) {
     throw new Error(`machine ${selfMachineName} is missing its own resolved machine endpoint`);
   }
 }
@@ -233,9 +251,12 @@ function main() {
   }
 
   const topology = readTopology(args.topologyPath);
-  const rendered = renderMachineConfig(topology, args.selfMachineName);
+  const rendered = renderMachineConfig(topology, args.selfMachineName, args.outputPath);
   validateRenderedConfig(rendered, args.selfMachineName);
-  fs.writeFileSync(args.outputPath, `${JSON.stringify(rendered, null, 2)}\n`);
+  const tmpOutputPath = `${args.outputPath}.tmp`;
+  fs.writeFileSync(tmpOutputPath, `${JSON.stringify(rendered, null, 2)}\n`);
+  loadConfig(tmpOutputPath);
+  fs.renameSync(tmpOutputPath, args.outputPath);
   process.stdout.write(`Wrote ${args.outputPath}\n`);
 }
 

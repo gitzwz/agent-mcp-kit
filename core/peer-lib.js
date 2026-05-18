@@ -8,7 +8,26 @@ import { promisify } from 'node:util';
 
 const FORBIDDEN_LEGACY_MACHINE_NAMES = new Set(['local-peer', 'remote-peer']);
 
+export function normalizePrincipalName(value, fieldLabel = 'name') {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${fieldLabel} is required`);
+  }
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9._-]+$/.test(trimmed)) {
+    throw new Error(`invalid ${fieldLabel}: ${value}`);
+  }
+  return trimmed.toLowerCase();
+}
+
+function normalizePrincipalMapKeys(obj) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return {};
+  return Object.fromEntries(
+    Object.entries(obj).map(([key, value]) => [normalizePrincipalName(key, 'map key'), value]),
+  );
+}
+
 const execFileAsync = promisify(execFile);
+
 
 // Reused HTTPS agents keyed by TLS material fingerprint.
 // This enables real keep-alive connection reuse across repeated machineRequest calls.
@@ -71,6 +90,26 @@ export function loadConfig(configPathArg) {
   if (!cfg.machine_name && cfg.peer_name) cfg.machine_name = cfg.peer_name;
   if (!cfg.machines && cfg.peers) cfg.machines = cfg.peers;
   if (!cfg.allowed_machine_names && cfg.allowed_server_names) cfg.allowed_machine_names = cfg.allowed_server_names;
+  cfg.machine_name = normalizePrincipalName(cfg.machine_name, 'machine_name');
+  cfg.allowed_machine_names = Array.isArray(cfg.allowed_machine_names)
+    ? [...new Set(cfg.allowed_machine_names.map((value) => normalizePrincipalName(value, 'allowed_machine_names')))].sort()
+    : [];
+  cfg.machines = Object.fromEntries(
+    Object.entries(cfg.machines || {}).map(([key, value]) => {
+      const normalizedKey = normalizePrincipalName(key, 'machine_name');
+      const normalizedPeer = value && typeof value === 'object' && !Array.isArray(value)
+        ? {
+            ...value,
+            server_name: typeof value.server_name === 'string'
+              ? normalizePrincipalName(value.server_name, `machines.${key}.server_name`)
+              : value.server_name,
+          }
+        : value;
+      return [normalizedKey, normalizedPeer];
+    }),
+  );
+  cfg.agent_profile_map = normalizePrincipalMapKeys(cfg.agent_profile_map);
+  cfg.agent_telegram_map = normalizePrincipalMapKeys(cfg.agent_telegram_map);
   validateConfigNoLegacy(cfg);
   cfg.workspace_dir = path.resolve(path.dirname(configPath), cfg.workspace_dir);
   cfg.state_dir = path.resolve(path.dirname(configPath), cfg.state_dir);
@@ -109,10 +148,7 @@ export function genJobId() {
 }
 
 export function safeMachineName(peerName) {
-  if (!/^[A-Za-z0-9._-]+$/.test(peerName || '')) {
-    throw new Error(`invalid peer name: ${peerName}`);
-  }
-  return peerName;
+  return normalizePrincipalName(peerName, 'peer name');
 }
 
 export function assertNoLegacyMachineName(peerName, contextLabel = 'machine_name') {
