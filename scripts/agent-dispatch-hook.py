@@ -62,7 +62,11 @@ def resolve_agent_telegram(to_agent: str) -> tuple[str, str]:
 
 
 def send_telegram(text: str, to_agent: str = ''):
-    bot_token, chat_id = resolve_agent_telegram(to_agent)
+    try:
+        bot_token, chat_id = resolve_agent_telegram(to_agent)
+    except ValueError as exc:
+        print(f'[agent-dispatch-hook] telegram skipped: {exc}', file=sys.stderr)
+        return
     if not bot_token or not chat_id:
         return
     base = f"https://api.telegram.org/bot{bot_token}/sendMessage"

@@ -353,6 +353,24 @@ This exposes the machine network as MCP tools.
 
 ### Step 8: verify it works
 
+Start with **reachability and listening**, then test real work.
+
+#### Minimal listen checks
+On the target machine:
+
+```bash
+lsof -iTCP:8443 -sTCP:LISTEN -nP
+```
+
+From the peer machine:
+
+```bash
+nc -vz <peer-ip-or-host> 8443
+```
+
+If these fail, do **not** jump straight to MCP debugging yet — the daemon may simply not be listening.
+
+#### Real acceptance
 Your first success condition is simple:
 - use an MCP tool such as `remote_submit_job`
 - target the other machine
@@ -360,6 +378,10 @@ Your first success condition is simple:
 - read output with `remote_job_output`
 
 If that works, your machine-to-machine trust and execution path is alive.
+
+#### About `/v1/health`
+Do **not** treat `GET /v1/health` as the acceptance standard here.
+This repo's operator flow is built around real tool paths like `remote_submit_job` / `notify_machine_agent`, not a guaranteed health endpoint contract.
 
 ---
 
@@ -375,6 +397,62 @@ If you want per-agent Telegram notifications:
 See:
 - `docs/AGENT_TELEGRAM_ROUTING.md`
 - `docs/skill/peer-ops-setup.md`
+
+---
+
+## Optional: push notify directly into Hermes
+
+There are **two different modes** for agent notify delivery:
+
+### 1) Mailbox only
+If `PEER_AGENT_CHAT_HOOK` is **not** set:
+- `notify_machine_agent` still writes a JSON record into `state/agent-chat/`
+- the API returns `pushed=false`
+- nothing is executed immediately
+
+This is useful if another worker will poll the mailbox later.
+
+### 2) Push to Hermes
+If `PEER_AGENT_CHAT_HOOK` is set and points at `scripts/agent-dispatch-hook.py`:
+- the message is still written into `state/agent-chat/`
+- the hook is executed immediately
+- the API returns `pushed=true`
+
+For Hermes-backed delivery, set these environment variables on the **daemon service**, not just in your shell:
+
+```text
+PEER_AGENT_CHAT_HOOK=/absolute/path/to/scripts/agent-dispatch-hook.py
+PEER_AGENT_EXEC_MODE=hermes
+PEER_AGENT_HERMES_BIN=/absolute/path/to/hermes
+PEER_AGENT_PROFILE_MAP={"to-agent":"/absolute/path/to/.hermes/profile"}
+```
+
+If you do not need per-agent profile routing, you may use a shared fallback instead:
+
+```text
+PEER_AGENT_HERMES_HOME=/absolute/path/to/default/.hermes/home
+```
+
+### macOS launchd example
+Put these under `EnvironmentVariables` in your plist:
+
+```xml
+<key>PEER_AGENT_CHAT_HOOK</key><string>/absolute/path/to/scripts/agent-dispatch-hook.py</string>
+<key>PEER_AGENT_EXEC_MODE</key><string>hermes</string>
+<key>PEER_AGENT_HERMES_BIN</key><string>/usr/local/bin/hermes</string>
+<key>PEER_AGENT_PROFILE_MAP</key><string>{"to-agent":"/Users/you/.hermes/profiles/to-agent"}</string>
+```
+
+After editing the plist, reload it with `launchctl bootout ... && launchctl bootstrap ...`.
+
+### Why `pushed=false` matters
+Interpret the API result like this:
+- `pushed=false` = message stored, but no hook executed
+- `pushed=true` = hook triggered
+
+### MCP visibility note
+Sometimes the parent session and a sub-agent / sub-Claude do **not** see the exact same MCP setup or permissions.
+If direct MCP calls in one session fail but a child Claude run succeeds, verify MCP visibility **inside the actual target session too**, not only in the parent shell.
 
 ---
 

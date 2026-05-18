@@ -51,6 +51,28 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
+function parseHookEnvMap(rawValue, label) {
+  const trimmed = String(rawValue || '').trim();
+  if (!trimmed) return {};
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`${label} must be a JSON object`);
+    }
+    return parsed;
+  } catch (error) {
+    console.error(`[peer-daemon] ignoring invalid ${label}: ${error.message || error}`);
+    return {};
+  }
+}
+
+function mergedHookMap(configMap, envValue, label) {
+  return {
+    ...(configMap && typeof configMap === 'object' && !Array.isArray(configMap) ? configMap : {}),
+    ...parseHookEnvMap(envValue, label),
+  };
+}
+
 async function unpackArchive(archivePath, destDir) {
   await fsp.mkdir(destDir, { recursive: true, mode: 0o700 });
   const lower = archivePath.toLowerCase();
@@ -354,6 +376,8 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
   // Optional push mode: execute immediately on receive (no mailbox polling)
   const hook = process.env.PEER_AGENT_CHAT_HOOK || '';
   if (hook.trim()) {
+    const mergedProfileMap = mergedHookMap(cfg.agent_profile_map, process.env.PEER_AGENT_PROFILE_MAP, 'PEER_AGENT_PROFILE_MAP');
+    const mergedTelegramMap = mergedHookMap(cfg.agent_telegram_map, process.env.PEER_AGENT_TELEGRAM_MAP, 'PEER_AGENT_TELEGRAM_MAP');
     const hookTimeout = Math.max(1, Math.min(Number(process.env.PEER_AGENT_CHAT_HOOK_TIMEOUT_SEC || 1800), 7200));
     const jobId = genJobId();
     const jobDir = path.join(jobsDir, jobId);
@@ -387,8 +411,8 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
         PEER_JOB_DIR: jobDir,
         PEER_INPUT_DIR: inputDir,
         PEER_AGENT_MESSAGE_PATH: payloadPath,
-        PEER_AGENT_PROFILE_MAP: JSON.stringify(cfg.agent_profile_map || {}),
-        PEER_AGENT_TELEGRAM_MAP: JSON.stringify(cfg.agent_telegram_map || {}),
+        PEER_AGENT_PROFILE_MAP: JSON.stringify(mergedProfileMap),
+        PEER_AGENT_TELEGRAM_MAP: JSON.stringify(mergedTelegramMap),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
