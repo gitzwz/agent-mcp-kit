@@ -9,6 +9,7 @@ PEER_AGENT_HOME="${PEER_AGENT_HOME:-$HOME}"
 PEER_AGENT_HERMES_HOME="${PEER_AGENT_HERMES_HOME:-$PEER_AGENT_HOME/.hermes}"
 PEER_AGENT_HERMES_BIN="${PEER_AGENT_HERMES_BIN:-$(command -v hermes || true)}"
 PEER_AGENT_CHAT_HOOK="${PEER_AGENT_CHAT_HOOK:-}"
+# Empty hook = mailbox-only mode; when enabled, the hook can route to Hermes/Telegram.
 PEER_AGENT_EXEC_MODE="${PEER_AGENT_EXEC_MODE:-hermes}"
 PEER_AGENT_PROFILE_MAP="${PEER_AGENT_PROFILE_MAP:-}"
 
