@@ -18,6 +18,12 @@ Goal:
 
 This is the canonical operator guide.
 
+Default behavior:
+- mailbox-only by default
+- optional push mode via `PEER_AGENT_CHAT_HOOK`
+- optional Hermes delivery via `PEER_AGENT_EXEC_MODE=hermes` plus `PEER_AGENT_PROFILE_MAP`
+- optional Telegram routing via `agent_telegram_map` / `PEER_AGENT_TELEGRAM_MAP`
+
 ---
 
 ## 0. The simple mental model
