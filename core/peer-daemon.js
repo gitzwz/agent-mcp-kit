@@ -413,6 +413,8 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
         PEER_AGENT_MESSAGE_PATH: payloadPath,
         PEER_AGENT_PROFILE_MAP: JSON.stringify(mergedProfileMap),
         PEER_AGENT_TELEGRAM_MAP: JSON.stringify(mergedTelegramMap),
+        PEER_MACHINE_NAME: cfg.machine_name,
+        PEER_LOCAL_AGENT_NAMES: JSON.stringify(Object.keys(cfg.agent_profile_map || {})),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,

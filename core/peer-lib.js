@@ -120,6 +120,12 @@ export function loadConfig(configPathArg) {
   cfg.job_output_max_bytes = Number.isFinite(parsedJobOutputMaxBytes) && parsedJobOutputMaxBytes > 0
     ? Math.min(Math.trunc(parsedJobOutputMaxBytes), 1024 * 1024 * 1024)
     : defaultJobOutputMaxBytes;
+  const defaultJobTimeoutSec = 1800;
+  const parsedJobTimeoutSec = Number(cfg.job_timeout_sec ?? defaultJobTimeoutSec);
+  cfg.job_timeout_sec = Number.isFinite(parsedJobTimeoutSec) && parsedJobTimeoutSec > 0
+    ? Math.min(Math.trunc(parsedJobTimeoutSec), 7200)
+    : defaultJobTimeoutSec;
+  cfg.job_persist_output = cfg.job_persist_output === true;
   cfg.tls.ca_cert = path.resolve(path.dirname(configPath), cfg.tls.ca_cert);
   cfg.tls.cert = path.resolve(path.dirname(configPath), cfg.tls.cert);
   cfg.tls.key = path.resolve(path.dirname(configPath), cfg.tls.key);
