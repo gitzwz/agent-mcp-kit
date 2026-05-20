@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadConfig, normalizePrincipalName } from './peer-lib.js';
 
 const DEFAULT_TOPOLOGY_PATH = path.resolve('config/topology.example.yaml');
 const DEFAULT_OUTPUT_PATH = path.resolve('config/machine-config.rendered.json');
@@ -13,6 +12,17 @@ const VALID_STRATEGIES = new Set([
   'cloudflare_tunnel',
   'manual',
 ]);
+
+function normalizePrincipalName(value, fieldLabel = 'name') {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${fieldLabel} is required`);
+  }
+  const trimmed = value.trim();
+  if (!/^[A-Za-z0-9._-]+$/.test(trimmed)) {
+    throw new Error(`invalid ${fieldLabel}: ${value}`);
+  }
+  return trimmed.toLowerCase();
+}
 
 function assertNoLegacyMachineName(machineName, contextLabel = 'machine_name') {
   const normalized = normalizePrincipalName(machineName, contextLabel);
@@ -88,14 +98,6 @@ function normalizeStrategy(strategy) {
   return strategy;
 }
 
-function resolveAbsoluteFromOutput(outputPath, candidate, label) {
-  if (typeof candidate !== 'string' || !candidate.trim()) {
-    throw new Error(`${label} is required`);
-  }
-  const outputDir = path.dirname(path.resolve(outputPath));
-  return path.resolve(outputDir, candidate);
-}
-
 function resolveMachineEndpoint(machineName, machineRecord) {
   const normalizedMachineName = assertNoLegacyMachineName(machineName, `machines.${machineName}`);
   const endpoint = requireObject(`machines.${machineName}.endpoint`, machineRecord.endpoint);
@@ -126,7 +128,7 @@ function resolveMachineEndpoint(machineName, machineRecord) {
   };
 }
 
-function renderMachineConfig(topology, selfMachineName, outputPath) {
+function renderMachineConfig(topology, selfMachineName) {
   const normalizedSelfMachineName = assertNoLegacyMachineName(selfMachineName, '--self');
   const machines = requireObject('machines', topology.machines);
   const normalizedMachines = Object.fromEntries(
@@ -140,7 +142,7 @@ function renderMachineConfig(topology, selfMachineName, outputPath) {
   const selfTls = requireObject(`machines.${selfMachineName}.tls`, self.tls || {});
   const selfWorkspace = typeof self.workspace_dir === 'string' ? self.workspace_dir : runtimeDefaults.workspace_dir;
   const selfState = typeof self.state_dir === 'string' ? self.state_dir : runtimeDefaults.state_dir;
-  const selfJobDir = typeof self.job_dir === 'string' ? self.job_dir : (runtimeDefaults.job_dir || '../jobs');
+  const selfJobDir = typeof self.job_dir === 'string' ? self.job_dir : (runtimeDefaults.job_dir || './log/jobs');
   const maxArchiveBytes = Number(self.max_archive_bytes ?? runtimeDefaults.max_archive_bytes);
 
   if (!selfWorkspace || !selfState || !selfJobDir || !Number.isFinite(maxArchiveBytes)) {
@@ -211,15 +213,15 @@ function renderMachineConfig(topology, selfMachineName, outputPath) {
     machine_name: normalizedSelfMachineName,
     listen_host: selfListen.host,
     listen_port: selfListen.port,
-    workspace_dir: resolveAbsoluteFromOutput(outputPath, selfWorkspace, 'workspace_dir'),
-    state_dir: resolveAbsoluteFromOutput(outputPath, selfState, 'state_dir'),
-    job_dir: resolveAbsoluteFromOutput(outputPath, selfJobDir, 'job_dir'),
+    workspace_dir: selfWorkspace,
+    state_dir: selfState,
+    job_dir: selfJobDir,
     job_partition_by_date: true,
     max_archive_bytes: maxArchiveBytes,
     tls: {
-      ca_cert: resolveAbsoluteFromOutput(outputPath, selfTls.ca_cert || tlsDefaults.ca_cert, 'tls.ca_cert'),
-      cert: resolveAbsoluteFromOutput(outputPath, selfTls.cert, 'tls.cert'),
-      key: resolveAbsoluteFromOutput(outputPath, selfTls.key, 'tls.key'),
+      ca_cert: selfTls.ca_cert || tlsDefaults.ca_cert,
+      cert: selfTls.cert,
+      key: selfTls.key,
     },
     allowed_machine_names: uniqueAllowedMachineNames,
     machines: renderedMachines,
@@ -252,12 +254,9 @@ function main() {
   }
 
   const topology = readTopology(args.topologyPath);
-  const rendered = renderMachineConfig(topology, args.selfMachineName, args.outputPath);
+  const rendered = renderMachineConfig(topology, args.selfMachineName);
   validateRenderedConfig(rendered, args.selfMachineName);
-  const tmpOutputPath = `${args.outputPath}.tmp`;
-  fs.writeFileSync(tmpOutputPath, `${JSON.stringify(rendered, null, 2)}\n`);
-  loadConfig(tmpOutputPath);
-  fs.renameSync(tmpOutputPath, args.outputPath);
+  fs.writeFileSync(args.outputPath, `${JSON.stringify(rendered, null, 2)}\n`);
   process.stdout.write(`Wrote ${args.outputPath}\n`);
 }
 

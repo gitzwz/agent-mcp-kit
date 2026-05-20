@@ -1,23 +1,50 @@
 {
+  "_doc": {
+    "model": "Machine + Agent",
+    "concepts": [
+      "Machine: a routable daemon identity such as rice or kobune.",
+      "Agent: a profile routed behind a machine via to_agent, such as reze.",
+      "A physical host can run multiple agents, but machine routing is always by machine_name."
+    ]
+  },
   "runtime_defaults": {
-    "workspace_dir": "../workspace",
-    "state_dir": "../state",
-    "job_dir": "../jobs",
+    "workspace_dir": "/absolute/path/to/workspace",
+    "state_dir": "../log/state",
+    "job_dir": "../log/jobs",
     "max_archive_bytes": 52428800
   },
   "tls_defaults": {
     "ca_cert": "../certs/ca/ca.crt"
   },
+  "hosts": {
+    "laptop": {
+      "description": "Personal laptop",
+      "machine_names": [
+        "rice"
+      ]
+    },
+    "vps": {
+      "description": "Public VPS",
+      "machine_names": [
+        "kobune"
+      ]
+    }
+  },
   "machines": {
     "rice": {
-      "listen": { "host": "127.0.0.1", "port": 8443 },
+      "description": "Machine identity hosted on laptop.",
+      "host": "laptop",
+      "listen": {
+        "host": "127.0.0.1",
+        "port": 8443
+      },
       "tls": {
         "cert": "../certs/rice/peer.crt",
         "key": "../certs/rice/peer.key"
       },
       "endpoint": {
         "strategy": "reverse_tunnel",
-        "url": "https://rice-tunnel.example.com:18443",
+        "url": "https://rice-tunnel.example.com:8443",
         "server_name": "rice",
         "metadata": {
           "remote_bind_host": "127.0.0.1",
@@ -35,14 +62,19 @@
       }
     },
     "kobune": {
-      "listen": { "host": "0.0.0.0", "port": 8443 },
+      "description": "Machine identity hosted on VPS.",
+      "host": "vps",
+      "listen": {
+        "host": "0.0.0.0",
+        "port": 8443
+      },
       "tls": {
         "cert": "../certs/kobune/peer.crt",
         "key": "../certs/kobune/peer.key"
       },
       "endpoint": {
         "strategy": "public",
-        "url": "https://machine-b.example.com:8443",
+        "url": "https://vps.example.com:8443",
         "server_name": "kobune"
       },
       "agents": {

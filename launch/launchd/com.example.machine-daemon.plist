@@ -18,12 +18,11 @@
     <key>HOME</key><string>{{HOME_DIR}}</string>
     <!-- Optional push hook:
     <key>PEER_AGENT_CHAT_HOOK</key><string>{{PROJECT_DIR}}/scripts/agent-dispatch-hook.py</string>
-    <key>PEER_AGENT_EXEC_MODE</key><string>hermes</string>
+    <key>PEER_AGENT_EXEC_MODE</key><string>notify</string>
     <key>PEER_AGENT_EXEC_TIMEOUT_SEC</key><string>1800</string>
     <key>PEER_AGENT_HOME</key><string>{{HOME_DIR}}</string>
     <key>PEER_AGENT_HERMES_HOME</key><string>{{HERMES_HOME}}</string>
     <key>PEER_AGENT_HERMES_BIN</key><string>{{HERMES_BIN}}</string>
-    <key>PEER_AGENT_PROFILE_MAP</key><string>{"to-agent":"{{HERMES_HOME}}"}</string>
     <key>PEER_AGENT_HERMES_ARGS</key><string>--quiet</string>
     -->
   </dict>

@@ -94,21 +94,24 @@ server.registerTool('remote_upload_and_run', {
     entrypoint: z.string(),
     args: z.array(z.string()).optional(),
     include_output: z.boolean().optional(),
+    persist_output: z.boolean().optional(),
     output_limit: z.number().int().min(0).max(1048576).optional(),
   },
-}, async ({ machine_name, archive_path, entrypoint, args = [], include_output = false, output_limit }) => {
+}, async ({ machine_name, archive_path, entrypoint, args = [], include_output = false, persist_output, output_limit }) => {
   if (!machine_name) throw new Error('machine_name is required');
   safeMachineName(machine_name);
   const cfg = snapshotConfig();
   const absArchive = path.resolve(archive_path);
   const archiveName = path.basename(absArchive);
   const data = fs.readFileSync(absArchive);
+  const shouldPersistOutput = persist_output ?? include_output;
   const result = await machineRequest(cfg, machine_name, '/v1/upload-and-run', {
     archiveBase64: data.toString('base64'),
     archiveName,
     entrypoint: safeRelativePath(entrypoint),
     args,
     include_output,
+    persist_output: shouldPersistOutput,
     output_limit,
   });
   return contentText(result);
@@ -158,6 +161,7 @@ registerMachineRequestTool(
     to_agent: z.string().min(1).max(200),
     text: z.string().min(1).max(20000),
     thread_id: z.string().max(200).optional(),
+    persist_output: z.boolean().optional(),
   },
 );
 
@@ -172,7 +176,9 @@ registerMachineRequestTool(
     script: z.string().min(1).max(200000),
     args: z.array(z.string()).optional(),
     timeout_sec: z.number().int().min(1).max(7200).optional(),
+    persist_output: z.boolean().optional(),
   },
+  ({ persist_output = true, ...payload }) => ({ ...payload, persist_output }),
 );
 
 server.registerTool('local_workspace_read_file', {

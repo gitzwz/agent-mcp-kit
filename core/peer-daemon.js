@@ -51,28 +51,6 @@ function sendJson(res, statusCode, payload) {
   res.end(body);
 }
 
-function parseHookEnvMap(rawValue, label) {
-  const trimmed = String(rawValue || '').trim();
-  if (!trimmed) return {};
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error(`${label} must be a JSON object`);
-    }
-    return parsed;
-  } catch (error) {
-    console.error(`[peer-daemon] ignoring invalid ${label}: ${error.message || error}`);
-    return {};
-  }
-}
-
-function mergedHookMap(configMap, envValue, label) {
-  return {
-    ...(configMap && typeof configMap === 'object' && !Array.isArray(configMap) ? configMap : {}),
-    ...parseHookEnvMap(envValue, label),
-  };
-}
-
 async function unpackArchive(archivePath, destDir) {
   await fsp.mkdir(destDir, { recursive: true, mode: 0o700 });
   const lower = archivePath.toLowerCase();
@@ -101,16 +79,13 @@ async function unpackArchive(archivePath, destDir) {
   await rejectSymlinks(destDir);
 }
 
-async function executeJob({ cfg, machineName, archiveBase64, archiveName, entrypoint, args = [] }) {
+async function executeJob({ cfg, machineName, archiveBase64, archiveName, entrypoint, args = [], timeout_sec, persist_output }) {
   if (!archiveBase64 || !entrypoint) {
     throw new Error('archiveBase64 and entrypoint are required');
   }
-  const jobsDir = cfg.job_dir;
   const safeEntrypoint = safeRelativePath(entrypoint);
   const jobId = genJobId();
-  const jobDir = path.join(jobsDir, jobId);
-  const inputDir = path.join(jobDir, 'input');
-  const metaDir = path.join(jobDir, 'meta');
+  const { jobDir, inputDir, metaDir, stdoutPath, stderrPath, statusPath } = buildJobPaths(cfg, jobId);
   await fsp.mkdir(inputDir, { recursive: true, mode: 0o700 });
   await fsp.mkdir(metaDir, { recursive: true, mode: 0o700 });
 
@@ -137,10 +112,9 @@ async function executeJob({ cfg, machineName, archiveBase64, archiveName, entryp
   }
   await fsp.chmod(scriptPath, 0o700).catch(() => {});
 
-  const stdoutPath = path.join(jobDir, 'stdout.log');
-  const stderrPath = path.join(jobDir, 'stderr.log');
-  const statusPath = path.join(jobDir, 'status.json');
   const startedAt = new Date().toISOString();
+  const persistOutput = persist_output === true || cfg.job_persist_output === true;
+  const timeoutSec = resolveJobTimeoutSec(cfg, timeout_sec ?? process.env.PEER_JOB_TIMEOUT_SEC);
   await writeJson(statusPath, {
     job_id: jobId,
     machine_name: machineName,
@@ -150,9 +124,11 @@ async function executeJob({ cfg, machineName, archiveBase64, archiveName, entryp
     args,
     started_at: startedAt,
     cwd: inputDir,
+    persist_output: persistOutput,
+    stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+    stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
   });
 
-  const timeoutSec = Number(process.env.PEER_JOB_TIMEOUT_SEC || 1800);
   const child = spawn(scriptPath, args.map(String), {
     cwd: inputDir,
     env: {
@@ -165,10 +141,17 @@ async function executeJob({ cfg, machineName, archiveBase64, archiveName, entryp
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   await fsp.mkdir(path.join(jobDir, 'tmp'), { recursive: true, mode: 0o700 });
-  const stdoutStream = fs.createWriteStream(stdoutPath, { mode: 0o600 });
-  const stderrStream = fs.createWriteStream(stderrPath, { mode: 0o600 });
-  child.stdout.pipe(stdoutStream, { end: false });
-  child.stderr.pipe(stderrStream, { end: false });
+  const maxBytes = cfg.job_output_max_bytes;
+  let outputTruncated = false;
+  const output = createOutputCapture({
+    stdout: child.stdout,
+    stderr: child.stderr,
+    stdoutPath,
+    stderrPath,
+    maxBytes,
+    persistOutput,
+    onLimit: () => { outputTruncated = true; },
+  });
 
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -182,7 +165,7 @@ async function executeJob({ cfg, machineName, archiveBase64, archiveName, entryp
     child.on('close', (code) => resolve(code ?? -1));
   }).finally(() => clearTimeout(timer));
 
-  await closeOutputStreams(stdoutStream, stderrStream);
+  await output.close();
   const finishedAt = new Date().toISOString();
   const state = timedOut ? 'timeout' : (exitCode === 0 ? 'ok' : 'failed');
   const status = {
@@ -196,8 +179,16 @@ async function executeJob({ cfg, machineName, archiveBase64, archiveName, entryp
     finished_at: finishedAt,
     exit_code: exitCode,
     cwd: inputDir,
-    stdout_path: path.relative(cfg.job_dir, stdoutPath),
-    stderr_path: path.relative(cfg.job_dir, stderrPath),
+    persist_output: persistOutput,
+    timeout_sec: timeoutSec,
+    stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+    stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
+    stdout_bytes: output.stdoutCapture.size,
+    stderr_bytes: output.stderrCapture.size,
+    stdout_truncated: output.stdoutCapture.truncated,
+    stderr_truncated: output.stderrCapture.truncated,
+    job_output_max_bytes: maxBytes,
+    output_truncated: outputTruncated,
   };
   await writeJson(statusPath, status);
   return status;
@@ -226,25 +217,204 @@ function safeJobId(jobId) {
   return value;
 }
 
-async function closeOutputStreams(stdoutStream, stderrStream) {
-  function endStream(stream) {
-    if (stream.destroyed) return Promise.resolve();
-    return new Promise((resolve, reject) => {
-      const cleanup = () => {
-        stream.off('error', onError);
-      };
-      const onError = (error) => {
-        cleanup();
-        reject(error);
-      };
-      stream.once('error', onError);
-      stream.end(() => {
-        cleanup();
-        resolve();
-      });
-    });
+function datedJobDir(baseDir, jobId, date = new Date()) {
+  const year = String(date.getUTCFullYear());
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return path.join(baseDir, `${year}${month}${day}`, jobId);
+}
+
+function buildJobPaths(cfg, jobId, date = new Date()) {
+  const jobDir = cfg.job_partition_by_date ? datedJobDir(cfg.job_dir, jobId, date) : path.join(cfg.job_dir, jobId);
+  const inputDir = path.join(jobDir, 'input');
+  const metaDir = path.join(jobDir, 'meta');
+  const stdoutPath = path.join(jobDir, 'stdout.log');
+  const stderrPath = path.join(jobDir, 'stderr.log');
+  const statusPath = path.join(jobDir, 'status.json');
+  return { jobDir, inputDir, metaDir, stdoutPath, stderrPath, statusPath };
+}
+
+function relativeJobPath(cfg, targetPath) {
+  return path.relative(cfg.job_dir, targetPath);
+}
+
+async function resolveJobDirById(cfg, jobId) {
+  const direct = path.join(cfg.job_dir, jobId);
+  try {
+    const stat = await fsp.stat(direct);
+    if (stat.isDirectory()) return direct;
+  } catch {}
+
+  if (!cfg.job_partition_by_date) {
+    return direct;
   }
-  await Promise.all([endStream(stdoutStream), endStream(stderrStream)]);
+
+  const datedPartitions = await fsp.readdir(cfg.job_dir, { withFileTypes: true }).catch(() => []);
+  for (const partitionEntry of datedPartitions) {
+    if (!partitionEntry.isDirectory()) continue;
+    const candidate = path.join(cfg.job_dir, partitionEntry.name, jobId);
+    try {
+      const stat = await fsp.stat(candidate);
+      if (stat.isDirectory()) return candidate;
+    } catch {}
+  }
+
+  const years = await fsp.readdir(cfg.job_dir, { withFileTypes: true }).catch(() => []);
+  for (const yearEntry of years) {
+    if (!yearEntry.isDirectory()) continue;
+    const yearDir = path.join(cfg.job_dir, yearEntry.name);
+    const legacyDays = await fsp.readdir(yearDir, { withFileTypes: true }).catch(() => []);
+    for (const dayEntry of legacyDays) {
+      if (!dayEntry.isDirectory()) continue;
+      const candidate = path.join(yearDir, dayEntry.name, jobId);
+      try {
+        const stat = await fsp.stat(candidate);
+        if (stat.isDirectory()) return candidate;
+      } catch {}
+    }
+  }
+
+  return direct;
+}
+
+function pipeWithMaxBytes(stream, outStream, maxBytes, label, onLimit) {
+  let totalBytes = 0;
+  let truncated = false;
+  let ended = false;
+
+  const finalizeLimit = () => {
+    if (truncated) return;
+    truncated = true;
+    const marker = Buffer.from(`\n[truncated ${label} at ${maxBytes} bytes]\n`);
+    outStream.write(marker);
+    if (typeof onLimit === 'function') onLimit();
+  };
+
+  stream.on('data', (chunk) => {
+    if (ended) return;
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    const remaining = maxBytes - totalBytes;
+    if (remaining <= 0) {
+      finalizeLimit();
+      return;
+    }
+    if (buffer.length <= remaining) {
+      totalBytes += buffer.length;
+      outStream.write(buffer);
+      return;
+    }
+    outStream.write(buffer.subarray(0, remaining));
+    totalBytes += remaining;
+    finalizeLimit();
+  });
+
+  stream.on('end', () => {
+    ended = true;
+    outStream.end();
+  });
+
+  stream.on('error', (error) => {
+    ended = true;
+    outStream.destroy(error);
+  });
+
+  return {
+    get size() {
+      return totalBytes;
+    },
+    get truncated() {
+      return truncated;
+    },
+  };
+}
+
+function drainWithMaxBytes(stream, maxBytes, onLimit) {
+  let totalBytes = 0;
+  let truncated = false;
+
+  const finalizeLimit = () => {
+    if (truncated) return;
+    truncated = true;
+    if (typeof onLimit === 'function') onLimit();
+  };
+
+  stream.on('data', (chunk) => {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > maxBytes) {
+      finalizeLimit();
+    }
+  });
+
+  stream.on('error', () => {
+    // best-effort drain; close is handled by child process lifecycle
+  });
+
+  stream.resume();
+
+  return {
+    get size() {
+      return totalBytes;
+    },
+    get truncated() {
+      return truncated;
+    },
+  };
+}
+
+function resolveJobTimeoutSec(cfg, payloadTimeoutSec, fallbackOverride = null) {
+  const fallback = fallbackOverride == null ? Number(cfg.job_timeout_sec ?? 1800) : Number(fallbackOverride);
+  const candidate = payloadTimeoutSec == null ? fallback : Number(payloadTimeoutSec);
+  if (!Number.isFinite(candidate) || candidate <= 0) return fallback;
+  return Math.min(Math.trunc(candidate), 7200);
+}
+
+function createOutputCapture({ stdout, stderr, stdoutPath, stderrPath, maxBytes, persistOutput, onLimit }) {
+  if (persistOutput) {
+    const stdoutStream = fs.createWriteStream(stdoutPath, { mode: 0o600 });
+    const stderrStream = fs.createWriteStream(stderrPath, { mode: 0o600 });
+    const stdoutCapture = pipeWithMaxBytes(stdout, stdoutStream, maxBytes, 'stdout', onLimit);
+    const stderrCapture = pipeWithMaxBytes(stderr, stderrStream, maxBytes, 'stderr', onLimit);
+    return {
+      stdoutCapture,
+      stderrCapture,
+      async close() {
+        await closeOutputStreams(stdoutStream, stderrStream);
+      },
+    };
+  }
+
+  return {
+    stdoutCapture: drainWithMaxBytes(stdout, maxBytes, onLimit),
+    stderrCapture: drainWithMaxBytes(stderr, maxBytes, onLimit),
+    async close() {
+      return undefined;
+    },
+  };
+}
+
+async function waitForWriteStream(stream) {
+  if (stream.destroyed || stream.closed) return;
+  await new Promise((resolve, reject) => {
+    const onError = (error) => {
+      cleanup();
+      reject(error);
+    };
+    const onFinish = () => {
+      cleanup();
+      resolve();
+    };
+    const cleanup = () => {
+      stream.off('error', onError);
+      stream.off('finish', onFinish);
+    };
+    stream.once('error', onError);
+    stream.once('finish', onFinish);
+  });
+}
+
+async function closeOutputStreams(stdoutStream, stderrStream) {
+  await Promise.all([waitForWriteStream(stdoutStream), waitForWriteStream(stderrStream)]);
 }
 
 function normalizeOutputLimit(value) {
@@ -298,14 +468,24 @@ async function readJobOutput(cfg, payload) {
   const limit = normalizeOutputLimit(payload?.limit);
   const stdoutOffset = normalizeOutputOffset(payload?.stdout_offset);
   const stderrOffset = normalizeOutputOffset(payload?.stderr_offset);
-  const jobsDir = cfg.job_dir;
-  const jobDir = await resolveInside(jobsDir, jobId);
+  const jobDir = await resolveJobDirById(cfg, jobId);
   const status = await readJson(path.join(jobDir, 'status.json'));
   if (!status) return null;
+  if (status.persist_output !== true) {
+    return {
+      job_id: jobId,
+      state: status.state,
+      exit_code: status.exit_code,
+      persist_output: false,
+      stdout: null,
+      stderr: null,
+    };
+  }
   return {
     job_id: jobId,
     state: status.state,
     exit_code: status.exit_code,
+    persist_output: true,
     stdout: await readLogSlice(path.join(jobDir, 'stdout.log'), stdoutOffset, limit),
     stderr: await readLogSlice(path.join(jobDir, 'stderr.log'), stderrOffset, limit),
   };
@@ -359,8 +539,6 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
   if (!text) throw new Error('text is required');
   if (text.length > 20000) throw new Error('text too long');
   const threadId = normalizeOptionalThreadId(payload?.thread_id);
-  const agentChatDir = path.join(cfg.state_dir, 'agent-chat');
-  const jobsDir = cfg.job_dir;
   const messageId = genJobId();
   const record = {
     message_id: messageId,
@@ -371,25 +549,20 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
     thread_id: threadId,
     received_at: new Date().toISOString(),
   };
+  const agentChatDir = path.join(cfg.state_dir, 'agent-chat');
   await writeJson(path.join(agentChatDir, `${messageId}.json`), record);
 
-  // Optional push mode: execute immediately on receive (no mailbox polling)
   const hook = process.env.PEER_AGENT_CHAT_HOOK || '';
   if (hook.trim()) {
-    const mergedProfileMap = mergedHookMap(cfg.agent_profile_map, process.env.PEER_AGENT_PROFILE_MAP, 'PEER_AGENT_PROFILE_MAP');
-    const mergedTelegramMap = mergedHookMap(cfg.agent_telegram_map, process.env.PEER_AGENT_TELEGRAM_MAP, 'PEER_AGENT_TELEGRAM_MAP');
-    const hookTimeout = Math.max(1, Math.min(Number(process.env.PEER_AGENT_CHAT_HOOK_TIMEOUT_SEC || 1800), 7200));
+    const hookTimeout = resolveJobTimeoutSec(cfg, process.env.PEER_AGENT_CHAT_HOOK_TIMEOUT_SEC);
     const jobId = genJobId();
-    const jobDir = path.join(jobsDir, jobId);
-    const inputDir = path.join(jobDir, 'input');
+    const { jobDir, inputDir, stdoutPath, stderrPath, statusPath } = buildJobPaths(cfg, jobId);
     await fsp.mkdir(inputDir, { recursive: true, mode: 0o700 });
     const payloadPath = path.join(inputDir, 'agent-message.json');
     await writeJson(payloadPath, record);
 
-    const stdoutPath = path.join(jobDir, 'stdout.log');
-    const stderrPath = path.join(jobDir, 'stderr.log');
-    const statusPath = path.join(jobDir, 'status.json');
     const startedAt = new Date().toISOString();
+    const persistOutput = cfg.job_persist_output === true || payload?.persist_output === true;
     await writeJson(statusPath, {
       job_id: jobId,
       machine_name: machineName,
@@ -399,6 +572,9 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
       hook,
       message_id: messageId,
       cwd: inputDir,
+      persist_output: persistOutput,
+      stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+      stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
     });
 
     const child = spawn(hook, [payloadPath], {
@@ -411,8 +587,8 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
         PEER_JOB_DIR: jobDir,
         PEER_INPUT_DIR: inputDir,
         PEER_AGENT_MESSAGE_PATH: payloadPath,
-        PEER_AGENT_PROFILE_MAP: JSON.stringify(mergedProfileMap),
-        PEER_AGENT_TELEGRAM_MAP: JSON.stringify(mergedTelegramMap),
+        PEER_AGENT_PROFILE_MAP: JSON.stringify(cfg.agent_profile_map || {}),
+        PEER_AGENT_TELEGRAM_MAP: JSON.stringify(cfg.agent_telegram_map || {}),
         PEER_MACHINE_NAME: cfg.machine_name,
         PEER_LOCAL_AGENT_NAMES: JSON.stringify(Object.keys(cfg.agent_profile_map || {})),
       },
@@ -420,10 +596,17 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
       detached: true,
     });
     await fsp.mkdir(path.join(jobDir, 'tmp'), { recursive: true, mode: 0o700 });
-    const stdoutStream = fs.createWriteStream(stdoutPath, { mode: 0o600 });
-    const stderrStream = fs.createWriteStream(stderrPath, { mode: 0o600 });
-    child.stdout.pipe(stdoutStream);
-    child.stderr.pipe(stderrStream);
+    const maxBytes = cfg.job_output_max_bytes;
+    let outputTruncated = false;
+    const output = createOutputCapture({
+      stdout: child.stdout,
+      stderr: child.stderr,
+      stdoutPath,
+      stderrPath,
+      maxBytes,
+      persistOutput,
+      onLimit: () => { outputTruncated = true; },
+    });
 
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -434,7 +617,7 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
 
     child.on('close', async (code) => {
       clearTimeout(timer);
-      await closeOutputStreams(stdoutStream, stderrStream);
+      await output.close();
       const finishedAt = new Date().toISOString();
       const state = timedOut ? 'timeout' : (code === 0 ? 'ok' : 'failed');
       await writeJson(statusPath, {
@@ -448,8 +631,16 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
         hook,
         message_id: messageId,
         cwd: inputDir,
-        stdout_path: path.relative(cfg.job_dir, stdoutPath),
-        stderr_path: path.relative(cfg.job_dir, stderrPath),
+        persist_output: persistOutput,
+        timeout_sec: hookTimeout,
+        stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+        stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
+        stdout_bytes: output.stdoutCapture.size,
+        stderr_bytes: output.stderrCapture.size,
+        stdout_truncated: output.stdoutCapture.truncated,
+        stderr_truncated: output.stderrCapture.truncated,
+        job_output_max_bytes: maxBytes,
+        output_truncated: outputTruncated,
       });
     });
     child.unref();
@@ -459,8 +650,8 @@ async function handleAgentChatMessage(cfg, machineName, payload) {
       pushed: true,
       hook_job_id: jobId,
       hook_state: 'running',
-      hook_stdout_path: path.relative(cfg.job_dir, stdoutPath),
-      hook_stderr_path: path.relative(cfg.job_dir, stderrPath),
+      hook_stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+      hook_stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
     };
   }
 
@@ -510,22 +701,18 @@ async function dispatchAgentTask(cfg, machineName, payload) {
   if (!script.trim()) throw new Error('script is required');
   if (script.length > 200000) throw new Error('script too long');
   const args = Array.isArray(payload?.args) ? payload.args.map((x) => String(x)) : [];
-  const timeoutSec = Math.max(1, Math.min(Number(payload?.timeout_sec ?? 1800), 7200));
+  const timeoutSec = resolveJobTimeoutSec(cfg, payload?.timeout_sec);
 
-  const jobsDir = cfg.job_dir;
   const jobId = genJobId();
-  const jobDir = path.join(jobsDir, jobId);
-  const inputDir = path.join(jobDir, 'input');
+  const { jobDir, inputDir, stdoutPath, stderrPath, statusPath } = buildJobPaths(cfg, jobId);
   await fsp.mkdir(inputDir, { recursive: true, mode: 0o700 });
 
   const scriptPath = path.join(inputDir, 'task.sh');
   await fsp.writeFile(scriptPath, script, { mode: 0o700 });
   await fsp.chmod(scriptPath, 0o700).catch(() => {});
 
-  const stdoutPath = path.join(jobDir, 'stdout.log');
-  const stderrPath = path.join(jobDir, 'stderr.log');
-  const statusPath = path.join(jobDir, 'status.json');
   const startedAt = new Date().toISOString();
+  const persistOutput = cfg.job_persist_output === true || payload?.persist_output === true;
 
   await writeJson(statusPath, {
     job_id: jobId,
@@ -537,6 +724,9 @@ async function dispatchAgentTask(cfg, machineName, payload) {
     args,
     started_at: startedAt,
     cwd: inputDir,
+    persist_output: persistOutput,
+    stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+    stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
   });
 
   const child = spawn(scriptPath, args, {
@@ -555,10 +745,17 @@ async function dispatchAgentTask(cfg, machineName, payload) {
   });
   await fsp.mkdir(path.join(jobDir, 'tmp'), { recursive: true, mode: 0o700 });
 
-  const stdoutStream = fs.createWriteStream(stdoutPath, { mode: 0o600 });
-  const stderrStream = fs.createWriteStream(stderrPath, { mode: 0o600 });
-  child.stdout.pipe(stdoutStream, { end: false });
-  child.stderr.pipe(stderrStream, { end: false });
+  const maxBytes = cfg.job_output_max_bytes;
+  let outputTruncated = false;
+  const output = createOutputCapture({
+    stdout: child.stdout,
+    stderr: child.stderr,
+    stdoutPath,
+    stderrPath,
+    maxBytes,
+    persistOutput,
+    onLimit: () => { outputTruncated = true; },
+  });
 
   let timedOut = false;
   const timer = setTimeout(() => {
@@ -569,7 +766,7 @@ async function dispatchAgentTask(cfg, machineName, payload) {
 
   child.on('close', async (code) => {
     clearTimeout(timer);
-    await closeOutputStreams(stdoutStream, stderrStream);
+    await output.close();
     const finishedAt = new Date().toISOString();
     const state = timedOut ? 'timeout' : (code === 0 ? 'ok' : 'failed');
     await writeJson(statusPath, {
@@ -584,8 +781,16 @@ async function dispatchAgentTask(cfg, machineName, payload) {
       finished_at: finishedAt,
       exit_code: code ?? -1,
       cwd: inputDir,
-      stdout_path: path.relative(cfg.workspace_dir, stdoutPath),
-      stderr_path: path.relative(cfg.workspace_dir, stderrPath),
+      persist_output: persistOutput,
+      timeout_sec: timeoutSec,
+      stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+      stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
+      stdout_bytes: output.stdoutCapture.size,
+      stderr_bytes: output.stderrCapture.size,
+      stdout_truncated: output.stdoutCapture.truncated,
+      stderr_truncated: output.stderrCapture.truncated,
+      job_output_max_bytes: maxBytes,
+      output_truncated: outputTruncated,
     });
   });
 
@@ -598,8 +803,9 @@ async function dispatchAgentTask(cfg, machineName, payload) {
     mode: 'agent-dispatch',
     from_agent: fromAgent,
     to_agent: toAgent,
-    stdout_path: path.relative(cfg.job_dir, stdoutPath),
-    stderr_path: path.relative(cfg.job_dir, stderrPath),
+    persist_output: persistOutput,
+    stdout_path: persistOutput ? relativeJobPath(cfg, stdoutPath) : null,
+    stderr_path: persistOutput ? relativeJobPath(cfg, stderrPath) : null,
   };
 }
 
@@ -625,8 +831,8 @@ async function handleRequest(req, res) {
     }
     if (req.url === '/v1/job-status') {
       const jobId = safeJobId(body.job_id);
-      const jobsDir = cfg.job_dir;
-      const result = await readJson(path.join(jobsDir, jobId, 'status.json'));
+      const jobDir = await resolveJobDirById(cfg, jobId);
+      const result = await readJson(path.join(jobDir, 'status.json'));
       if (!result) return sendJson(res, 404, { error: 'job_not_found' });
       return sendJson(res, 200, result);
     }

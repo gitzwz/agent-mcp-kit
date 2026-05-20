@@ -10,5 +10,7 @@ state/
 config/machine.*.json
 !config/machine.example.json
 *.local.json
+peer-config.*.json
 *.tar.gz
+topology.yaml
 scripts/__pycache__/

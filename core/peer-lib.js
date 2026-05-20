@@ -28,7 +28,6 @@ function normalizePrincipalMapKeys(obj) {
 
 const execFileAsync = promisify(execFile);
 
-
 // Reused HTTPS agents keyed by TLS material fingerprint.
 // This enables real keep-alive connection reuse across repeated machineRequest calls.
 const _httpsAgentCache = new Map();
