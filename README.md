@@ -9,6 +9,57 @@
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
+> 部署在每台机器上的 Daemon（MCP Server），把多台机器统一暴露给支持 MCP 的 Agent 管理；同时暴露各机器上的 Agent 名单，让 Agent 与 Agent 之间也能直接通信。
+
+## Agent 侧能力
+
+- **读取目标机器文件**：仅允许工作区内的相对路径。
+- **提交远程任务并读取输出**：把任务发到指定机器执行，再拉回状态、stdout、stderr。
+- **给另一台机器上的 Agent 发通知**：让 Agent 去通知 Agent，而不是让人重复同步每个窗口。
+
+## 你可以用它做什么
+
+- **只通过一个 Agent 管多台机器**  
+  例如：在 Claude Code 或 Hermes 的对话里，直接说“诊断一下 xx 机器，把 xx 服务拉起”。
+- **让 Agent 去通知 Agent**  
+  例如：在 Agent1 的窗口里，让它通过 MCP 通知其他 Agent 安装某个 skill。
+- **让 Agent Gateway 和 Daemon 双活**  
+  某台机器上的 Agent Gateway 挂掉时，其他 Agent 仍可通过该机器上的 Daemon 把它拉起；反过来也成立。
+
+## 设计思想
+
+- **一个 Agent 负责一个垂直事项**。如果资源不够，就跨 laptop、VPS、Android 等设备调度资源；而不是在多台机器上跑一堆做同一件事的 Agent。
+- **一件事只需要和一个 Agent 同步一次**。后续通知其他 Agent、分发执行、跨机器协同，都交给 Agent 自己处理。
+
+## 使用方式
+
+把 [`docs/skill/peer-ops-setup.md`](./docs/skill/peer-ops-setup.md) 交给你的 Agent，并告诉它：
+
+- 你要 **init**（新建 CA），还是 **join**（加入已有 Daemon 集群）
+- 如果你使用的是 **Hermes Agent**，是否还要安装 Optional 内容：
+  - `chat hook`
+  - `telegram` 显示
+
+## 注意事项
+
+- 机器之间的可达性可以通过这些方式提供：
+  - **公网地址 / 局域网地址**
+  - **反向隧道**（典型场景：VPS + 局域网机器）
+  - **Tailscale**（更广泛、更省心的场景）
+- 日志按 `YYYYMMDD` 目录存放在 `log/` 下，每条日志默认 **10 MB** 上限。
+- 对 Hermes 而言，`chat hook` / Telegram 路由属于 **Optional**：
+  - 默认情况下，Agent 通信只会把内容放进对方机器上的 MCP Mailbox。
+  - 如果你想“收到后立刻消费”，就需要自己针对 Agent 类型实现 chat hook / notify。
+  - 本项目已经为 **Hermes** 提供了一个测试过的 `hermes chat -q` 简单 hook，以及 Telegram 配置说明，因此可以直接在 Telegram 里看到对方 Agent 收到命令的情况。
+
+## 为什么会有这个项目
+
+很多时候，真正缺的不是另一个“大而全的平台”，而是一个足够轻、足够直接的运行层：
+
+- 让 Agent 能安全地跨机器读文件、跑任务、取输出
+- 让 Agent 能把事项继续分发给其他 Agent
+- 让机器控制与 Agent 通信放在同一套最小闭环里
+
 A beginner-friendly toolkit for connecting **your own machines** and exposing them to MCP-capable agents over **mTLS**, with reachability provided by **Tailscale, public endpoints, or reverse tunnels**.
 
 With this project, an agent can:
